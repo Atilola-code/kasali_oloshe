@@ -169,28 +169,3 @@ class UserDetailView(generics.RetrieveUpdateDestroyAPIView):
             )
         
         return super().delete(request, *args, **kwargs)
-    
-@api_view(['POST'])
-@permission_classes([AllowAny])
-def create_initial_superuser(request):
-    """
-    Temporary endpoint to create the first superuser in production.
-    REMOVE THIS AFTER CREATING THE SUPERUSER!
-    """
-    User = get_user_model()
-    
-    # Check if any superuser exists
-    if not User.objects.filter(is_superuser=True).exists():
-        User.objects.create_superuser(
-            email='admin123@gmail.com',  # Change to your real admin email
-            password='Admin12345',      # Change to a secure password
-            first_name='Admin',
-            last_name='User'
-        )
-        return Response({
-            'message': 'Superuser created successfully',
-            'email': 'admin123@gmail.com'
-        }, status=status.HTTP_201_CREATED)
-    return Response({
-        'message': 'Superuser already exists'
-    }, status=status.HTTP_200_OK)
