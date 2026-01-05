@@ -31,7 +31,7 @@ SECRET_KEY = os.getenv('SECRET_KEY')
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DEBUG', 'False')
 
-ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1,kasali-oloshe.onrender.com').split(',')
+ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1,kasali-oloshe.onrender.com,kasali-oloshe-inventory-management.vercel.app').split(',')
 
 RENDER_EXTERNAL_HOSTNAME = os.getenv('RENDER_EXTERNAL_HOSTNAME')
 if RENDER_EXTERNAL_HOSTNAME:
@@ -119,9 +119,10 @@ AUTH_USER_MODEL = 'user.User'
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
+    "https://kasali-oloshe-inventory-management.vercel.app"
 ]
 CORS_ALLOW_CREDENTIALS = True
-CORS_ALLOW_ALL_ORIGINS = True
+
 
 
 ROOT_URLCONF = 'my_project.urls'
