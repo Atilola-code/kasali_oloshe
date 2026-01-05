@@ -37,17 +37,18 @@ RENDER_EXTERNAL_HOSTNAME = os.getenv('RENDER_EXTERNAL_HOSTNAME')
 if RENDER_EXTERNAL_HOSTNAME:
     ALLOWED_HOSTS.append(RENDER_EXTERNAL_HOSTNAME)
 
+# Database configuration
 if 'DATABASE_URL' in os.environ:
-    # Render PostgreSQL
+    # Render production environment PostgreSQL (uses DATABASE_URL from environment variables)
     DATABASES = {
         'default': dj_database_url.config(
             default=os.getenv('DATABASE_URL'),
             conn_max_age=600,
-            ssl_require=True
+            ssl_require=True  # Render databases typically require SSL
         )
     }
 else:
-    # Local development
+    # Local development environment
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.postgresql',
@@ -56,8 +57,13 @@ else:
             'PASSWORD': os.getenv('DB_PASSWORD', 'Atilola1211'),
             'HOST': os.getenv('DB_HOST', 'localhost'),
             'PORT': os.getenv('DB_PORT', '5432'),
+            # Explicitly disable SSL for local development
+            'OPTIONS': {
+                'sslmode': 'disable'  # ✅ Key fix
+            }
         }
     }
+    
 # Application definition
 
 INSTALLED_APPS = [
@@ -168,16 +174,16 @@ SIMPLE_JWT = {
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql_psycopg2',
-        'NAME': 'kasali_oloshe',
-        'USER': 'postgres',
-        'PASSWORD': 'Atilola1211',
-        'HOST': 'localhost',
-        'PORT': '5432',
-    }
-}
+# DATABASES = {
+#     'default': {
+#         'ENGINE': 'django.db.backends.postgresql_psycopg2',
+#         'NAME': 'kasali_oloshe',
+#         'USER': 'postgres',
+#         'PASSWORD': 'Atilola1211',
+#         'HOST': 'localhost',
+#         'PORT': '5432',
+#     }
+# }
 
 
 # Password validation
