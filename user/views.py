@@ -9,6 +9,7 @@ from .serializers import UserSerializer, LoginSerializer, CustomTokenObtainPairS
 from .permissions import IsAdminOrManager
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
+from rest_framework_simplejwt.tokens import RefreshToken
 
 
 class CustomTokenObtainPairView(TokenObtainPairView):
@@ -169,3 +170,37 @@ class UserDetailView(generics.RetrieveUpdateDestroyAPIView):
             )
         
         return super().delete(request, *args, **kwargs)
+
+
+
+    # @api_view(['POST'])
+    # def refresh_token_view(request):
+    #     """
+    #     Custom token refresh endpoint
+    #     """
+    #     refresh_token = request.data.get('refresh')
+        
+    #     if not refresh_token:
+    #         return Response(
+    #             {'error': 'Refresh token is required'}, 
+    #             status=status.HTTP_400_BAD_REQUEST
+    #         )
+        
+    #     try:
+    #         refresh = RefreshToken(refresh_token)
+    #         data = {
+    #             'access': str(refresh.access_token),
+    #         }
+            
+    #         # Optionally rotate refresh token
+    #         # refresh.set_jti()
+    #         # refresh.set_exp()
+    #         # data['refresh'] = str(refresh)
+            
+    #         return Response(data, status=status.HTTP_200_OK)
+        
+    #     except Exception as e:
+    #         return Response(
+    #             {'error': 'Invalid or expired refresh token'}, 
+    #             status=status.HTTP_401_UNAUTHORIZED
+    #         )

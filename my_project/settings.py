@@ -153,6 +153,8 @@ WSGI_APPLICATION = 'my_project.wsgi.application'
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(days=1), # Set expiration for access token
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7), # Set expiration for refresh token
+    'ROTATE_REFRESH_TOKENS': False,
+    'BLACKLIST_AFTER_ROTATION': True,
 
     'ALGORITHM': 'HS256', # The algorithm used to sign the token. The formula on how the token is signed
     'SIGNING_KEY': SECRET_KEY, # Your django key to give the token a unique signature or to use the secret key to sign the token
@@ -164,6 +166,10 @@ SIMPLE_JWT = {
     'USER_ID_FIELD': 'id',
     'USER_ID_CLAIM': 'user_id',
 
+    'SLIDING_TOKEN_REFRESH_EXP_CLAIM': 'refresh_exp',
+    'SLIDING_TOKEN_LIFETIME': timedelta(minutes=5),
+    'SLIDING_TOKEN_REFRESH_LIFETIME': timedelta(days=1),
+    
     'AUTH_TOKEN_CLASSES': ('rest_framework_simplejwt.tokens.AccessToken',),
     'TOKEN_TYPE_CLAIM': 'token_type',
     'JTI_CLAIM': 'jti',
