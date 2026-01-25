@@ -1,6 +1,7 @@
 # sales/serializers.py
 from rest_framework import serializers
 from django.db import transaction
+from django.db.models import Q
 from .models import Sale, SaleItem,Deposit, StopSaleLog, Credit, CreditPayment
 from inventory.models import Product
 import uuid
@@ -17,16 +18,24 @@ class SaleItemSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'subtotal', 'product_name', 'product_id']
 
     def validate_product(self, value):
-        # Accept either product name or SKU
-        product = Product.objects.filter(name__iexact=value).first()
-        # If not found by name, try SKU
-        if not product:
-            product = Product.objects.filter(sku__iexact=value).first()
-
+        # Check if value is numeric (could be product ID)
+        if str(value).isdigit():
+            try:
+                product = Product.objects.get(id=int(value))
+                return product
+            except Product.DoesNotExist:
+                raise serializers.ValidationError(f"Product with ID {value} not found")
+        
+        # Otherwise, treat as product name or SKU
+        product = Product.objects.filter(
+            Q(name__iexact=value) | Q(sku__iexact=value)
+        ).first()
+        
         if not product:
             raise serializers.ValidationError(
                 f"Product '{value}' not found. Please use exact product name or SKU."
-                )
+            )
+        
         return product
 
 class SaleSerializer(serializers.ModelSerializer):
@@ -48,18 +57,44 @@ class SaleSerializer(serializers.ModelSerializer):
         if not items:
             raise serializers.ValidationError({"items": "A sale must include at least one item."})
         
-        # Logging for debugging
-        print(f"DEBUG: Validating {len(items)} items")
-
-        # ensure stock available
-        for i, item in enumerate(items):
-            product = item['product']
-            print(f"DEBUG: Item {i} - Product: {product.name}, Quantity: {item['quantity']}, Available: {product.quantity}")
+        # Convert product strings to Product objects and validate stock
+        for i, item_data in enumerate(items):
+            product_value = item_data.get('product')
             
-            if product.quantity < item['quantity']:
-                raise serializers.ValidationError(
-                    {"error": f"Insufficient stock for {product.name}. Available quantity: {product.quantity}"}
-                    )
+            if not product_value:
+                raise serializers.ValidationError({
+                    f"items[{i}].product": "Product is required"
+                })
+            
+            # If product is a string, convert to Product object
+            if isinstance(product_value, str):
+                try:
+                    # Try to find product by name or SKU
+                    product = Product.objects.filter(
+                        Q(name__iexact=product_value) | Q(sku__iexact=product_value)
+                    ).first()
+                    
+                    if not product:
+                        raise serializers.ValidationError({
+                            f"items[{i}].product": f"Product '{product_value}' not found"
+                        })
+                    
+                    # Replace string with Product object
+                    item_data['product'] = product
+                except Exception as e:
+                    raise serializers.ValidationError({
+                        f"items[{i}].product": f"Error finding product: {str(e)}"
+                    })
+            
+            # Now validate stock
+            product = item_data['product']
+            quantity = item_data.get('quantity', 0)
+            
+            if product.quantity < quantity:
+                raise serializers.ValidationError({
+                    f"items[{i}].quantity": f"Insufficient stock for {product.name}. Available: {product.quantity}"
+                })
+        
         return attrs
     
     @transaction.atomic
@@ -69,7 +104,7 @@ class SaleSerializer(serializers.ModelSerializer):
         vat_percent = validated_data.pop('vat_percent', 0) or 0
         user = self.context['request'].user
 
-        # calculate subtotal from items
+        # Calculate subtotal from items
         subtotal = sum(
             item_data['quantity'] * item_data['unit_price']
             for item_data in items_data
@@ -84,9 +119,8 @@ class SaleSerializer(serializers.ModelSerializer):
         amount_paid = validated_data.get('amount_paid', 0)
         change_due = round(amount_paid - total, 2) if amount_paid >= total else 0
         
-        # Generate invoice ID if not provided
-        invoice_id = validated_data.get('invoice_id') or f"INV-{uuid.uuid4().hex[:8].upper()}"
-
+        # Generate invoice ID
+        invoice_id = f"INV-{uuid.uuid4().hex[:8].upper()}"
 
         # Create the sale
         sale = Sale.objects.create(
@@ -102,6 +136,7 @@ class SaleSerializer(serializers.ModelSerializer):
             change_due=change_due
         )
 
+        # Create sale items and update stock
         for item_data in items_data:
             product = item_data['product']
 
@@ -110,7 +145,9 @@ class SaleSerializer(serializers.ModelSerializer):
             
             # Double-check stock (race condition protection)
             if product.quantity < item_data['quantity']:
-                raise serializers.ValidationError(f"Not enough stock for {product.name}. Avalailable quantity: {product.quantity}")
+                raise serializers.ValidationError(
+                    f"Not enough stock for {product.name}. Available quantity: {product.quantity}"
+                )
 
             # Create sale item
             SaleItem.objects.create(
@@ -131,10 +168,13 @@ class SaleSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         # Handle items separately
         items_data = validated_data.pop('items', None)
+        discount_percent = validated_data.pop('discount_percent', 0) or 0
+        vat_percent = validated_data.pop('vat_percent', 0) or 0
         
         # Update simple fields
         for attr, value in validated_data.items():
-            setattr(instance, attr, value)
+            if attr not in ['items', 'discount_percent', 'vat_percent']:
+                setattr(instance, attr, value)
         
         # If items are provided, update them
         if items_data is not None:
@@ -148,15 +188,11 @@ class SaleSerializer(serializers.ModelSerializer):
             # Delete old items
             old_items.delete()
             
-            # Create new items (similar to create logic)
-            discount_percent = validated_data.pop('discount_percent', 0) or 0
-            vat_percent = validated_data.pop('vat_percent', 0) or 0
-            
-            # Recalculate subtotal from new items
             subtotal = sum(
                 item_data['quantity'] * item_data['unit_price']
                 for item_data in items_data
             )
+            
             
             discount_amount = round((subtotal * (discount_percent / 100)), 2) if discount_percent else 0
             vat_base = subtotal - discount_amount

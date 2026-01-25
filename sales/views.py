@@ -1,4 +1,6 @@
 # sales/views.py
+import logging
+import traceback
 from rest_framework import viewsets, generics, status, mixins
 from rest_framework.response import Response
 from rest_framework.decorators import action, api_view, permission_classes
@@ -13,6 +15,7 @@ from .models import Sale, Deposit, StopSaleLog, Credit, CreditPayment
 from .serializers import SaleSerializer, DepositSerializer, StopSaleLogSerializer, StopSaleStatusSerializer, CreditSerializer, ClearCreditSerializer
 from user.permissions import IsAdminOrManager, IsCashier
 
+logger = logging.getLogger(__name__)
 
 class SaleViewSet(mixins.ListModelMixin,
                   mixins.RetrieveModelMixin,
@@ -78,19 +81,34 @@ class SaleViewSet(mixins.ListModelMixin,
         """
         Override create to check if sales are stopped
         """
+        try:
         # Check if sales are stopped
-        is_stopped = cache.get('is_sale_stopped', False)
-        
-        if is_stopped:
-            # Check if user is ADMIN or MANAGER
-            user_role = request.user.role if hasattr(request.user, 'role') else None
-            if user_role not in ['ADMIN', 'MANAGER']:
-                return Response(
-                    {'error': 'Sales have been stopped by management. Please contact your supervisor.'},
-                    status=status.HTTP_403_FORBIDDEN
-                )
-        
-        return super().create(request, *args, **kwargs)
+            is_stopped = cache.get('is_sale_stopped', False)
+            
+            if is_stopped:
+                # Check if user is ADMIN or MANAGER
+                user_role = request.user.role if hasattr(request.user, 'role') else None
+                if user_role not in ['ADMIN', 'MANAGER']:
+                    return Response(
+                        {'error': 'Sales have been stopped by management. Please contact your supervisor.'},
+                        status=status.HTTP_403_FORBIDDEN
+                    )
+            
+            response = super().create(request, *args, **kwargs)
+            logger.info(f"✅ Sale created successfully: {response.data.get('invoice_id')}")
+            return response
+                
+        except Exception as e:
+            logger.error(f"❌ Error creating sale: {str(e)}")
+            logger.error(traceback.format_exc())
+            return Response(
+                {
+                    'error': 'Failed to create sale',
+                    'detail': str(e),
+                    'type': type(e).__name__
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
     @extend_schema(
         summary="Update a sale",
@@ -100,7 +118,18 @@ class SaleViewSet(mixins.ListModelMixin,
         tags=["Sales"]
     )
     def update(self, request, *args, **kwargs):
-        return super().update(request, *args, **kwargs)
+        try:
+            return super().update(request, *args, **kwargs)
+        except Exception as e:
+            logger.error(f"❌ Error updating sale: {str(e)}")
+            logger.error(traceback.format_exc())
+            return Response(
+                {
+                    'error': 'Failed to update sale',
+                    'detail': str(e)
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
     @extend_schema(
         summary="Increment receipt print count",
@@ -111,12 +140,22 @@ class SaleViewSet(mixins.ListModelMixin,
     )
     @action(detail=True, methods=['patch'])
     def increment_print_count(self, request, pk=None):
-        sale = self.get_object()
-        sale.increment_print_count()
-        return Response({
-            'receipt_print_count': sale.receipt_print_count,
-            'message': 'Print count updated successfully'
-        })
+        try:
+            sale = self.get_object()
+            sale.increment_print_count()
+            return Response({
+                'receipt_print_count': sale.receipt_print_count,
+                'message': 'Print count updated successfully'
+            })
+        except Exception as e:
+            logger.error(f"❌ Error incrementing print count: {str(e)}")
+            logger.error(traceback.format_exc())
+            return Response(
+                {
+                    'error': str(e)
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 class BulkSalesSyncView(generics.CreateAPIView):
@@ -124,43 +163,53 @@ class BulkSalesSyncView(generics.CreateAPIView):
     Accepts many sales from offline client. Payload: {"sales": [ {...}, {...} ]}
     Each sale will update inventory and return created invoice IDs.
     """
-    permission_classes = [IsAuthenticated & (IsAdminOrManager | IsCashier)]
+    permission_classes = [IsAuthenticated]
     serializer_class = SaleSerializer
 
     def post(self, request, *args, **kwargs):
+        try:
         # Check if sales are stopped
-        is_stopped = cache.get('is_sale_stopped', False)
-        
-        if is_stopped:
-            # Check if user is ADMIN or MANAGER
-            user_role = request.user.role if hasattr(request.user, 'role') else None
-            if user_role not in ['ADMIN', 'MANAGER']:
-                return Response(
-                    {'error': 'Sales have been stopped. Cannot sync offline sales.'},
-                    status=status.HTTP_403_FORBIDDEN
-                )
-        
-        sales_data = request.data.get("sales", [])
-        created_invoices = []
-        errors = []
+            is_stopped = cache.get('is_sale_stopped', False)
+            
+            if is_stopped:
+                # Check if user is ADMIN or MANAGER
+                user_role = request.user.role if hasattr(request.user, 'role') else None
+                if user_role not in ['ADMIN', 'MANAGER']:
+                    return Response(
+                        {'error': 'Sales have been stopped. Cannot sync offline sales.'},
+                        status=status.HTTP_403_FORBIDDEN
+                    )
+            
+            sales_data = request.data.get("sales", [])
+            created_invoices = []
+            errors = []
 
-        for sale_data in sales_data:
-            serializer = SaleSerializer(data=sale_data, context={'request': request})
-            if serializer.is_valid():
-                try:
-                    with transaction.atomic():
-                        sale = serializer.save()
-                        created_invoices.append(sale.invoice_id)
-                except Exception as e:
-                    errors.append({f"sale_error": str(e)})
-                    
-            else:
-                errors.append(serializer.errors)
+            for sale_data in sales_data:
+                serializer = SaleSerializer(data=sale_data, context={'request': request})
+                if serializer.is_valid():
+                    try:
+                        with transaction.atomic():
+                            sale = serializer.save()
+                            created_invoices.append(sale.invoice_id)
+                    except Exception as e:
+                        logger.error(f"Failed to create sale in bulk sync: {str(e)}")
+                        errors.append({f"sale_error": str(e)})
+                        
+                else:
+                    errors.append(serializer.errors)
 
-        return Response(
-            {"created": created_invoices, "errors": errors},
-            status=status.HTTP_207_MULTI_STATUS if errors else status.HTTP_201_CREATED
-        )
+            return Response(
+                {"created": created_invoices, "errors": errors},
+                status=status.HTTP_207_MULTI_STATUS if errors else status.HTTP_201_CREATED
+            )
+        except Exception as e:
+            logger.error(f"❌ Error in bulk sales sync: {str(e)}")
+            logger.error(traceback.format_exc())
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
     
 class DepositAPIView(generics.ListCreateAPIView):  # Changed from APIView
     """

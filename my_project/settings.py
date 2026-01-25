@@ -13,10 +13,10 @@ import os
 import dj_database_url
 from dotenv import load_dotenv
 
-load_dotenv()
-
 from pathlib import Path
 from datetime import timedelta
+
+load_dotenv()
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -29,7 +29,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.getenv('SECRET_KEY')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv('DEBUG', 'False')
+DEBUG = os.getenv('DEBUG', 'False') == 'True'
 
 ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1,kasali-oloshe.onrender.com,kasali-oloshe-inventory-management.vercel.app').split(',')
 
@@ -67,6 +67,7 @@ else:
 # Application definition
 
 INSTALLED_APPS = [
+    'daphne',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -79,6 +80,8 @@ INSTALLED_APPS = [
     'sales.apps.SalesConfig',
     'purchase_orders.apps.PurchaseOrdersConfig',
     'corsheaders',
+    'chat',
+    'channels',
     'drf_spectacular',
     'user',
     'django_filters',
@@ -123,12 +126,40 @@ SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 AUTH_USER_MODEL = 'user.User'
 
+# Channels Configuration
+import ssl
+
+redis_url = os.getenv('REDIS_URL')
+if redis_url:
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels_redis.core.RedisChannelLayer',
+            'CONFIG': {
+                "hosts": [redis_url],
+                "prefix": "kasali_chat",
+            },
+        }
+    }
+else:
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels.layers.InMemoryChannelLayer',
+        }
+    }
+
+ASGI_APPLICATION = 'my_project.asgi.application'
+
+ALLOWED_HOSTS = [
+    'kasali-oloshe.onrender.com',
+    'kasali-oloshe-inventory-management.vercel.app'
+]
+
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",
     "https://kasali-oloshe-inventory-management.vercel.app"
 ]
 CORS_ALLOW_CREDENTIALS = True
 
+# For Daphne/ASGI on Render
 
 
 ROOT_URLCONF = 'my_project.urls'
@@ -227,6 +258,7 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
@@ -239,3 +271,44 @@ EMAIL_PORT = int(os.getenv('EMAIL_PORT', 587))
 EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'True') == 'True'
 EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER')
 EMAIL_HOST_PASSWORD = os.getenv("APP_PASSWORD")  # Fetching from .env file
+DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'hammedolasupo03@gmail.com')
+
+FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000')
+
+TEMPLATES = [
+    {
+        'BACKEND': 'django.template.backends.django.DjangoTemplates',
+        'DIRS': [BASE_DIR / 'templates'],  # ✅ This allows email templates
+        'APP_DIRS': True,
+        'OPTIONS': {
+            'context_processors': [
+                'django.template.context_processors.debug',
+                'django.template.context_processors.request',
+                'django.contrib.auth.context_processors.auth',
+                'django.contrib.messages.context_processors.messages',
+            ],
+        },
+    },
+]
+
+# ✅ Logging configuration for debugging
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': 'INFO',
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console'],
+            'level': os.getenv('DJANGO_LOG_LEVEL', 'INFO'),
+            'propagate': False,
+        },
+    },
+}
