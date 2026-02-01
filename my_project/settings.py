@@ -149,15 +149,24 @@ else:
 
 ASGI_APPLICATION = 'my_project.asgi.application'
 
-ALLOWED_HOSTS = [
-    'kasali-oloshe.onrender.com',
-    'kasali-oloshe-inventory-management.vercel.app'
-]
-
 CORS_ALLOWED_ORIGINS = [
-    "https://kasali-oloshe-inventory-management.vercel.app"
+    "https://kasali-oloshe-inventory-management.vercel.app",
+    "https://kasali-oloshe.onrender.com",
+    "http://localhost:3000"
 ]
 CORS_ALLOW_CREDENTIALS = True
+
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
+]
 
 # For Daphne/ASGI on Render
 
