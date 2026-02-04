@@ -21,16 +21,16 @@ class RegisterUserView(generics.CreateAPIView):
     """
     queryset = User.objects.all()
     serializer_class = UserSerializer
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [IsAdminOrManager]
 
-    def perform_create(self, serializer):
-        # Make first user ADMIN automatically
-        user = serializer.save()
-        if User.objects.count() == 1:  # First user ever
-            user.role = 'ADMIN'
-            user.is_staff = True
-            user.is_superuser = True
-            user.save()
+    # def perform_create(self, serializer):
+    #     # Make first user ADMIN automatically
+    #     user = serializer.save()
+    #     if User.objects.count() == 1:  # First user ever
+    #         user.role = 'ADMIN'
+    #         user.is_staff = True
+    #         user.is_superuser = True
+    #         user.save()
             
     @extend_schema(
         summary="Register a new user (Admin or Manager)",
