@@ -16,6 +16,10 @@ class Message(models.Model):
     message = models.TextField()
     is_read = models.BooleanField(default=False)
     read_at = models.DateTimeField(null=True, blank=True)
+    is_deleted_by_sender = models.BooleanField(default=False)
+    is_deleted_by_receiver = models.BooleanField(default=False)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+    reaction = models.CharField(max_length=10, null=True, blank=True)  # Store emoji
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -24,6 +28,7 @@ class Message(models.Model):
         indexes = [
             models.Index(fields=['sender', 'receiver']),
             models.Index(fields=['receiver', 'is_read']),
+            models.Index(fields=['created_at']),
         ]
 
     def __str__(self):
@@ -37,6 +42,9 @@ class Message(models.Model):
             'message': self.message,
             'isRead': self.is_read,
             'readAt': self.read_at.isoformat() if self.read_at else None,
+            'reaction': self.reaction,
+            'isDeletedBySender': self.is_deleted_by_sender,
+            'isDeletedByReceiver': self.is_deleted_by_receiver,
             'createdAt': self.created_at.isoformat(),
             'sender': {
                 'id': str(self.sender.id),
@@ -44,3 +52,21 @@ class Message(models.Model):
                 'last_name': self.sender.last_name,
             }
         }
+
+    def soft_delete(self, user):
+        """Soft delete message for a specific user"""
+        if user == self.sender:
+            self.is_deleted_by_sender = True
+        elif user == self.receiver:
+            self.is_deleted_by_receiver = True
+        
+        from django.utils import timezone
+        if not self.deleted_at:
+            self.deleted_at = timezone.now()
+        
+        self.save()
+
+    @property
+    def is_deleted(self):
+        """Check if message is deleted for both users"""
+        return self.is_deleted_by_sender and self.is_deleted_by_receiver

@@ -2,7 +2,6 @@
 import json
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
-import uuid
 
 class ChatConsumer(AsyncWebsocketConsumer):
     async def connect(self):
@@ -42,41 +41,48 @@ class ChatConsumer(AsyncWebsocketConsumer):
         message_type = data.get('type')
         
         if message_type == 'chat_message':
-            await self.handle_chat_message(data)
+            await self.handle_chat_message_broadcast(data)
         elif message_type == 'typing_start':
             await self.handle_typing(data, True)
         elif message_type == 'typing_stop':
             await self.handle_typing(data, False)
         elif message_type == 'mark_read':
             await self.handle_mark_read(data)
+        elif message_type == 'message_read':
+            await self.handle_message_read(data)
+        elif message_type == 'message_reaction':
+            await self.handle_message_reaction(data)
+        elif message_type == 'message_delete':
+            await self.handle_message_delete(data)
 
-    async def handle_chat_message(self, data):
+    async def handle_chat_message_broadcast(self, data):
+        """Broadcast message to receiver without saving (HTTP API handles saving)"""
         receiver_id = data.get('receiverId')
         message_text = data.get('message')
+        message_id = data.get('messageId')
         
-        # Save message to database
-        message = await self.save_message(
-            sender_id=self.user.id,
-            receiver_id=receiver_id,
-            message_text=message_text
-        )
-        
-        # Send to receiver ONLY (not back to sender)
+        # Broadcast to receiver
         await self.channel_layer.group_send(
             f'user_{receiver_id}',
             {
                 'type': 'chat_message_handler',
-                'message': message
+                'message': {
+                    'id': message_id,
+                    'senderId': str(self.user.id),
+                    'receiverId': receiver_id,
+                    'message': message_text,
+                    'isRead': False,
+                    'createdAt': data.get('createdAt'),
+                    'sender': {
+                        'first_name': self.user.first_name,
+                        'last_name': self.user.last_name,
+                    }
+                }
             }
         )
-        
-        # Send confirmation to sender ONLY (with the saved message)
-        await self.send(text_data=json.dumps({
-            'type': 'message_sent',
-            'message': message
-        }))
 
     async def chat_message_handler(self, event):
+        """Receive message from room group and send to WebSocket"""
         message = event['message']
         await self.send(text_data=json.dumps({
             'type': 'new_message',
@@ -106,22 +112,77 @@ class ChatConsumer(AsyncWebsocketConsumer):
         sender_id = data.get('senderId')
         await self.mark_messages_read(sender_id, self.user.id)
 
-    @database_sync_to_async
-    def save_message(self, sender_id, receiver_id, message_text):
-        from django.contrib.auth import get_user_model
-        from .models import Message
+    async def handle_message_read(self, data):
+        """Handle single message read receipt"""
+        message_id = data.get('messageId')
+        receiver_id = data.get('receiverId')
         
-        User = get_user_model()
-        sender = User.objects.get(id=sender_id)
-        receiver = User.objects.get(id=receiver_id)
-        
-        message = Message.objects.create(
-            sender=sender,
-            receiver=receiver,
-            message=message_text
+        # Broadcast read receipt to sender
+        await self.channel_layer.group_send(
+            f'user_{receiver_id}',
+            {
+                'type': 'message_read_handler',
+                'messageId': message_id,
+                'readBy': str(self.user.id)
+            }
         )
+
+    async def message_read_handler(self, event):
+        """Send read receipt to WebSocket"""
+        await self.send(text_data=json.dumps({
+            'type': 'message_read',
+            'messageId': event['messageId'],
+            'readBy': event['readBy']
+        }))
+
+    async def handle_message_reaction(self, data):
+        """Handle message reaction"""
+        message_id = data.get('messageId')
+        reaction = data.get('reaction')
+        receiver_id = data.get('receiverId')
         
-        return message.to_dict()
+        # Broadcast reaction to other user
+        await self.channel_layer.group_send(
+            f'user_{receiver_id}',
+            {
+                'type': 'message_reaction_handler',
+                'messageId': message_id,
+                'reaction': reaction,
+                'reactedBy': str(self.user.id)
+            }
+        )
+
+    async def message_reaction_handler(self, event):
+        """Send reaction update to WebSocket"""
+        await self.send(text_data=json.dumps({
+            'type': 'message_reaction',
+            'messageId': event['messageId'],
+            'reaction': event['reaction'],
+            'reactedBy': event['reactedBy']
+        }))
+
+    async def handle_message_delete(self, data):
+        """Handle message deletion"""
+        message_id = data.get('messageId')
+        receiver_id = data.get('receiverId')
+        
+        # Broadcast deletion to other user
+        await self.channel_layer.group_send(
+            f'user_{receiver_id}',
+            {
+                'type': 'message_delete_handler',
+                'messageId': message_id,
+                'deletedBy': str(self.user.id)
+            }
+        )
+
+    async def message_delete_handler(self, event):
+        """Send deletion update to WebSocket"""
+        await self.send(text_data=json.dumps({
+            'type': 'message_deleted',
+            'messageId': event['messageId'],
+            'deletedBy': event['deletedBy']
+        }))
 
     @database_sync_to_async
     def mark_messages_read(self, sender_id, receiver_id):
