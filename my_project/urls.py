@@ -29,6 +29,7 @@ urlpatterns = [
     path('api/users/', include('user.urls')),
     path('api/purchase-orders/', include('purchase_orders.urls')),
     path('api/chat/', include('chat.urls')),
+    path('api/expenses/', include('expenses.urls')),
 
 
     #API Documentation

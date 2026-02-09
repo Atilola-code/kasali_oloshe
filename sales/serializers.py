@@ -6,6 +6,7 @@ from .models import Sale, SaleItem,Deposit, StopSaleLog, Credit, CreditPayment
 from inventory.models import Product
 import uuid
 from user.serializers import UserSerializer
+from decimal import Decimal
 
 class SaleItemSerializer(serializers.ModelSerializer):
     product = serializers.CharField()
@@ -43,14 +44,34 @@ class SaleSerializer(serializers.ModelSerializer):
     cashier_name = serializers.CharField(source='cashier.get_full_name', read_only=True)
     invoice_id = serializers.CharField(read_only=True)
     date = serializers.DateTimeField(read_only=True)
-    # optional input fields for convenience:
-    discount_percent = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, write_only=True)
-    vat_percent = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, write_only=True)
+    # Change from discount_percent to discount_amount
+    discount_amount = serializers.DecimalField(
+        max_digits=10, 
+        decimal_places=2, 
+        required=False, 
+        write_only=True,
+        default=0
+    )
+    vat_percent = serializers.DecimalField(
+        max_digits=5, 
+        decimal_places=2, 
+        required=False, 
+        write_only=True,
+        default=0
+    )
 
     class Meta:
         model = Sale
-        fields = ['id', 'invoice_id', 'cashier', 'cashier_name', 'customer_name', 'date', 'subtotal','discount_amount','vat_amount', 'total_amount', 'payment_method', 'amount_paid', 'change_due', 'items', 'discount_percent','vat_percent', 'receipt_print_count']
-        read_only_fields = ['id', 'invoice_id','subtotal','total_amount','change_due', 'date', 'cashier']
+        fields = [
+            'id', 'invoice_id', 'cashier', 'cashier_name', 'customer_name', 
+            'date', 'subtotal', 'discount_amount', 'vat_amount', 'total_amount', 
+            'payment_method', 'amount_paid', 'change_due', 'items', 
+            'vat_percent', 'receipt_print_count'
+        ]
+        read_only_fields = [
+            'id', 'invoice_id', 'subtotal', 'total_amount', 
+            'change_due', 'date', 'cashier', 'vat_amount'
+        ]
 
     def validate(self, attrs):
         items = attrs.get('items', [])
@@ -95,12 +116,26 @@ class SaleSerializer(serializers.ModelSerializer):
                     f"items[{i}].quantity": f"Insufficient stock for {product.name}. Available: {product.quantity}"
                 })
         
+        # Validate discount amount
+        discount_amount = attrs.get('discount_amount', 0)
+        if discount_amount:
+            # Calculate subtotal to validate discount doesn't exceed it
+            subtotal = sum(
+                item_data['quantity'] * item_data['unit_price']
+                for item_data in items
+            )
+            
+            if discount_amount > subtotal:
+                raise serializers.ValidationError({
+                    'discount_amount': f'Discount amount ({discount_amount}) cannot exceed subtotal ({subtotal})'
+                })
+        
         return attrs
     
     @transaction.atomic
     def create(self, validated_data):
         items_data = validated_data.pop('items')
-        discount_percent = validated_data.pop('discount_percent', 0) or 0
+        discount_amount = validated_data.pop('discount_amount', 0) or 0
         vat_percent = validated_data.pop('vat_percent', 0) or 0
         user = self.context['request'].user
 
@@ -110,15 +145,22 @@ class SaleSerializer(serializers.ModelSerializer):
             for item_data in items_data
         )
 
-        discount_amount = round((subtotal * (discount_percent / 100)), 2) if discount_percent else 0
-        vat_base = subtotal - discount_amount
-        vat_amount = round((vat_base * (vat_percent / 100)), 2) if vat_percent else 0
+        # Ensure discount doesn't exceed subtotal
+        subtotal_decimal = Decimal(str(subtotal))
+        discount_amount_decimal = Decimal(str(discount_amount))
+        
+        # Ensure discount doesn't exceed subtotal
+        discount_amount_decimal = min(discount_amount_decimal, subtotal_decimal)
+        
+        vat_base = subtotal_decimal - discount_amount_decimal
+        vat_amount = round((vat_base * (Decimal(str(vat_percent)) / Decimal('100'))), 2) if vat_percent else Decimal('0')
         total = round(vat_base + vat_amount, 2)
 
         # Calculate change
         amount_paid = validated_data.get('amount_paid', 0)
-        change_due = round(amount_paid - total, 2) if amount_paid >= total else 0
-        
+        amount_paid_decimal = Decimal(str(amount_paid)) if amount_paid else Decimal('0')
+        change_due = round(amount_paid_decimal - total, 2) if amount_paid_decimal >= total else Decimal('0')
+            
         # Generate invoice ID
         invoice_id = f"INV-{uuid.uuid4().hex[:8].upper()}"
 
@@ -127,12 +169,12 @@ class SaleSerializer(serializers.ModelSerializer):
             invoice_id=invoice_id,
             cashier=user,
             customer_name=validated_data.get('customer_name', ''),
-            subtotal=subtotal,
-            discount_amount=discount_amount,
+            subtotal=subtotal_decimal,
+            discount_amount=discount_amount_decimal,  # ✅ Store discount amount
             vat_amount=vat_amount,
             total_amount=total,
             payment_method=validated_data.get('payment_method', 'cash'),
-            amount_paid=amount_paid,
+            amount_paid=amount_paid_decimal,
             change_due=change_due
         )
 
@@ -168,12 +210,12 @@ class SaleSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         # Handle items separately
         items_data = validated_data.pop('items', None)
-        discount_percent = validated_data.pop('discount_percent', 0) or 0
+        discount_amount = validated_data.pop('discount_amount', 0) or 0
         vat_percent = validated_data.pop('vat_percent', 0) or 0
         
         # Update simple fields
         for attr, value in validated_data.items():
-            if attr not in ['items', 'discount_percent', 'vat_percent']:
+            if attr not in ['items', 'discount_amount', 'vat_percent']:
                 setattr(instance, attr, value)
         
         # If items are provided, update them
@@ -193,10 +235,10 @@ class SaleSerializer(serializers.ModelSerializer):
                 for item_data in items_data
             )
             
-            
-            discount_amount = round((subtotal * (discount_percent / 100)), 2) if discount_percent else 0
+            # ✅ FIXED: Discount is now an amount
+            discount_amount = min(Decimal(str(discount_amount)), subtotal)
             vat_base = subtotal - discount_amount
-            vat_amount = round((vat_base * (vat_percent / 100)), 2) if vat_percent else 0
+            vat_amount = round((vat_base * (Decimal(str(vat_percent)) / Decimal('100'))), 2) if vat_percent else Decimal('0')
             total = round(vat_base + vat_amount, 2)
             
             # Update sale instance with new totals

@@ -57,6 +57,7 @@ else:
             'PASSWORD': os.getenv('DB_PASSWORD', 'Atilola1211'),
             'HOST': os.getenv('DB_HOST', 'localhost'),
             'PORT': os.getenv('DB_PORT', '5432'),
+            'CONN_MAX_AGE': 600,
             # Explicitly disable SSL for local development
             'OPTIONS': {
                 'sslmode': 'disable'  # ✅ Key fix
@@ -64,8 +65,27 @@ else:
         }
     }
     
-# Application definition
 
+
+    # Database query optimization
+    DATABASE_OPTIONS = {
+        'connect_timeout': 10,
+        'sslmode': 'require',
+    }
+    
+    # Caching
+    CACHES = {
+        "default": {
+            "BACKEND": "django_redis.cache.RedisCache",
+            "LOCATION": "redis://127.0.0.1:6379/1",
+            "OPTIONS": {
+                "CLIENT_CLASS": "django_redis.client.DefaultClient",
+            },
+            "KEY_PREFIX": "kasali_oloshe"
+        }
+    }
+
+# Application definition
 INSTALLED_APPS = [
     'daphne',
     'django.contrib.admin',
@@ -84,6 +104,7 @@ INSTALLED_APPS = [
     'channels',
     'drf_spectacular',
     'user',
+    'expenses',
     'django_filters',
 ]
 
@@ -116,6 +137,7 @@ MIDDLEWARE = [
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
+    'django.middleware.gzip.GZipMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
@@ -184,6 +206,12 @@ TEMPLATES = [
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
             ],
+            'loaders': [
+                ('django.template.loaders.cached.Loader', [
+                    'django.template.loaders.filesystem.Loader',
+                    'django.template.loaders.app_directories.Loader',
+                ]),
+            ]
         },
     },
 ]
@@ -279,7 +307,7 @@ EMAIL_HOST = os.getenv('EMAIL_HOST', 'smtp.gmail.com')
 EMAIL_PORT = int(os.getenv('EMAIL_PORT', 587))
 EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'True') == 'True'
 EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER')
-EMAIL_HOST_PASSWORD = os.getenv("APP_PASSWORD")  # Fetching from .env file
+EMAIL_HOST_PASSWORD = os.getenv("APP_PASSWORD")  
 DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'hammedolasupo03@gmail.com')
 
 FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000')

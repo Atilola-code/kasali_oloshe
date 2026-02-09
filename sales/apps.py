@@ -7,4 +7,4 @@ class SalesConfig(AppConfig):
 
     def ready(self):
         """Initialize signals when Django starts"""
-        import sales.signals  # Import signals to register them
+        import sales.signals  

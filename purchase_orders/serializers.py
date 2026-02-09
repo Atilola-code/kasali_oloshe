@@ -139,5 +139,5 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
 
 
 class ChangeStatusSerializer(serializers.Serializer):
-    status = serializers.ChoiceField(choices=['pending', 'approved', 'received', 'cancelled'])
+    status = serializers.ChoiceField(choices=['draft', 'pending', 'approved', 'received', 'cancelled'])
     notes = serializers.CharField(required=False, allow_blank=True)
