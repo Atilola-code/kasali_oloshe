@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 
 from pathlib import Path
 from datetime import timedelta
+import importlib.util
 
 load_dotenv()
 
@@ -38,17 +39,33 @@ if RENDER_EXTERNAL_HOSTNAME:
     ALLOWED_HOSTS.append(RENDER_EXTERNAL_HOSTNAME)
 
 # Database configuration
-if 'DATABASE_URL' in os.environ:
-    # Render production environment PostgreSQL (uses DATABASE_URL from environment variables)
+if 'SUPABASE_DB_HOST' in os.environ:
+    # Production with Supabase
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': os.getenv('SUPABASE_DB_NAME'),
+            'USER': os.getenv('SUPABASE_DB_USER'),
+            'PASSWORD': os.getenv('SUPABASE_DB_PASSWORD'),
+            'HOST': os.getenv('SUPABASE_DB_HOST'),
+            'PORT': os.getenv('SUPABASE_DB_PORT', '5432'),
+            'CONN_MAX_AGE': 600,
+            'OPTIONS': {
+                'sslmode': 'require'  # Supabase requires SSL
+            }
+        }
+    }
+elif 'DATABASE_URL' in os.environ:
+    # Render PostgreSQL (backward compatibility)
     DATABASES = {
         'default': dj_database_url.config(
             default=os.getenv('DATABASE_URL'),
             conn_max_age=600,
-            ssl_require=True  # Render databases typically require SSL
+            ssl_require=True
         )
     }
 else:
-    # Local development environment
+    # Local development environment with local PostgreSQL
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.postgresql',
@@ -58,13 +75,11 @@ else:
             'HOST': os.getenv('DB_HOST', 'localhost'),
             'PORT': os.getenv('DB_PORT', '5432'),
             'CONN_MAX_AGE': 600,
-            # Explicitly disable SSL for local development
             'OPTIONS': {
-                'sslmode': 'disable'  # ✅ Key fix
+                'sslmode': 'disable'  # No SSL for local
             }
         }
-    }
-    
+    }    
 
 
     # Database query optimization
@@ -74,16 +89,37 @@ else:
     }
     
     # Caching
-    CACHES = {
-        "default": {
-            "BACKEND": "django_redis.cache.RedisCache",
-            "LOCATION": "redis://127.0.0.1:6379/1",
-            "OPTIONS": {
-                "CLIENT_CLASS": "django_redis.client.DefaultClient",
-            },
-            "KEY_PREFIX": "kasali_oloshe"
+    django_redis_installed = importlib.util.find_spec("django_redis") is not None
+
+    # Get Redis URL from environment
+    redis_url = os.getenv('REDIS_URL')
+
+    if django_redis_installed and redis_url:
+        # Use Upstash Redis for caching
+        CACHES = {
+            "default": {
+                "BACKEND": "django_redis.cache.RedisCache",
+                "LOCATION": redis_url,
+                "OPTIONS": {
+                    "CLIENT_CLASS": "django_redis.client.DefaultClient",
+                    "CONNECTION_POOL_KWARGS": {"max_connections": 100},
+                },
+                "KEY_PREFIX": "kasali_cache",
+                "TIMEOUT": 300,
+            }
         }
-    }
+        print(" Using Upstash Redis for caching")
+    else:
+        # Fallback to dummy cache (no caching)
+        CACHES = {
+            'default': {
+                'BACKEND': 'django.core.cache.backends.dummy.DummyCache',
+            }
+        }
+        if not django_redis_installed:
+            print("⚠️ django-redis not installed. Cache disabled.")
+        elif not redis_url:
+            print("⚠️ REDIS_URL not set. Cache disabled.")
 
 # Application definition
 INSTALLED_APPS = [
