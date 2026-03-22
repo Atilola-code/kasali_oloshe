@@ -48,10 +48,10 @@ if 'SUPABASE_DB_HOST' in os.environ:
             'USER': os.getenv('SUPABASE_DB_USER'),
             'PASSWORD': os.getenv('SUPABASE_DB_PASSWORD'),
             'HOST': os.getenv('SUPABASE_DB_HOST'),
-            'PORT': os.getenv('SUPABASE_DB_PORT', '5432'),
+            'PORT': os.getenv('SUPABASE_DB_PORT', '6543'),  # Changed default to 6543
             'CONN_MAX_AGE': 600,
             'OPTIONS': {
-                'sslmode': 'require'  # Supabase requires SSL
+                'sslmode': 'require'
             }
         }
     }
@@ -76,50 +76,46 @@ else:
             'PORT': os.getenv('DB_PORT', '5432'),
             'CONN_MAX_AGE': 600,
             'OPTIONS': {
-                'sslmode': 'disable'  # No SSL for local
+                'sslmode': 'disable'
             }
         }
-    }    
-
-
-    # Database query optimization
-    DATABASE_OPTIONS = {
-        'connect_timeout': 10,
-        'sslmode': 'require',
     }
-    
-    # Caching
-    django_redis_installed = importlib.util.find_spec("django_redis") is not None
 
-    # Get Redis URL from environment
-    redis_url = os.getenv('REDIS_URL')
+# ✅ CACHING - MOVED OUTSIDE THE DATABASE CONDITIONAL
+# Database query optimization
+DATABASE_OPTIONS = {
+    'connect_timeout': 10,
+    'sslmode': 'require',
+}
 
-    if django_redis_installed and redis_url:
-        # Use Upstash Redis for caching
-        CACHES = {
-            "default": {
-                "BACKEND": "django_redis.cache.RedisCache",
-                "LOCATION": redis_url,
-                "OPTIONS": {
-                    "CLIENT_CLASS": "django_redis.client.DefaultClient",
-                    "CONNECTION_POOL_KWARGS": {"max_connections": 100},
-                },
-                "KEY_PREFIX": "kasali_cache",
-                "TIMEOUT": 300,
-            }
+# Caching - Smart configuration
+django_redis_installed = importlib.util.find_spec("django_redis") is not None
+redis_url = os.getenv('REDIS_URL')
+
+if django_redis_installed and redis_url:
+    CACHES = {
+        "default": {
+            "BACKEND": "django_redis.cache.RedisCache",
+            "LOCATION": redis_url,
+            "OPTIONS": {
+                "CLIENT_CLASS": "django_redis.client.DefaultClient",
+                "CONNECTION_POOL_KWARGS": {"max_connections": 100},
+            },
+            "KEY_PREFIX": "kasali_cache",
+            "TIMEOUT": 300,
         }
-        print(" Using Upstash Redis for caching")
-    else:
-        # Fallback to dummy cache (no caching)
-        CACHES = {
-            'default': {
-                'BACKEND': 'django.core.cache.backends.dummy.DummyCache',
-            }
+    }
+    print("✅ Using Upstash Redis for caching")
+else:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.dummy.DummyCache',
         }
-        if not django_redis_installed:
-            print("⚠️ django-redis not installed. Cache disabled.")
-        elif not redis_url:
-            print("⚠️ REDIS_URL not set. Cache disabled.")
+    }
+    if not django_redis_installed:
+        print(" django-redis not installed. Cache disabled.")
+    elif not redis_url:
+        print(" REDIS_URL not set. Cache disabled.")
 
 # Application definition
 INSTALLED_APPS = [
