@@ -56,7 +56,7 @@ Recommended Action:
 - Contact supplier for restock
 - Review sales trends for this product
 
-This is an automated alert from Kasali Oloshe Inventory Management System.
+This is an automated alert from CrystalCrest Global Inventory Management System.
         """
         
         # Send email

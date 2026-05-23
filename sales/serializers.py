@@ -2,7 +2,7 @@
 from rest_framework import serializers
 from django.db import transaction
 from django.db.models import Q
-from .models import Sale, SaleItem,Deposit, StopSaleLog, Credit, CreditPayment
+from .models import Sale, SaleItem, Deposit, StopSaleLog, Credit, CreditPayment, UnsuppliedItem, Unsupplied
 from inventory.models import Product
 import uuid
 from user.serializers import UserSerializer
@@ -19,7 +19,7 @@ class SaleItemSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'subtotal', 'product_name', 'product_id']
 
     def validate_product(self, value):
-        # Check if value is numeric (could be product ID)
+
         if str(value).isdigit():
             try:
                 product = Product.objects.get(id=int(value))
@@ -235,7 +235,7 @@ class SaleSerializer(serializers.ModelSerializer):
                 for item_data in items_data
             )
             
-            # ✅ FIXED: Discount is now an amount
+            #  Discount is now an amount
             discount_amount = min(Decimal(str(discount_amount)), subtotal)
             vat_base = subtotal - discount_amount
             vat_amount = round((vat_base * (Decimal(str(vat_percent)) / Decimal('100'))), 2) if vat_percent else Decimal('0')
@@ -336,3 +336,43 @@ class ClearCreditSerializer(serializers.Serializer):
         if value <= 0:
             raise serializers.ValidationError("Payment amount must be greater than zero")
         return value
+    
+class UnsuppliedItemSerializer(serializers.ModelSerializer):
+    product_name = serializers.CharField(source='product.name', read_only=True)
+    product_id = serializers.IntegerField(source='product.id', read_only=True)
+    product = serializers.PrimaryKeyRelatedField(queryset=Product.objects.all())
+ 
+    class Meta:
+        model = UnsuppliedItem
+        fields = ['id', 'product', 'product_name', 'product_id', 'quantity', 'notes']
+        read_only_fields = ['id', 'product_name', 'product_id']
+ 
+ 
+class UnsuppliedSerializer(serializers.ModelSerializer):
+    items = UnsuppliedItemSerializer(many=True)
+    created_by_name = serializers.CharField(source='created_by.get_full_name', read_only=True)
+    supplied_by_name = serializers.CharField(source='supplied_by.get_full_name', read_only=True)
+ 
+    class Meta:
+        model = Unsupplied
+        fields = [
+            'id', 'customer_name', 'date', 'notes', 'status',
+            'supplied_at', 'supplied_by', 'supplied_by_name',
+            'created_by', 'created_by_name', 'created_at', 'items'
+        ]
+        read_only_fields = ['id', 'date', 'created_by', 'created_at', 'supplied_at', 'supplied_by']
+ 
+    @transaction.atomic
+    def create(self, validated_data):
+        items_data = validated_data.pop('items')
+        user = self.context['request'].user
+ 
+        unsupplied = Unsupplied.objects.create(
+            **validated_data,
+            created_by=user
+        )
+ 
+        for item_data in items_data:
+            UnsuppliedItem.objects.create(unsupplied=unsupplied, **item_data)
+ 
+        return unsupplied

@@ -42,7 +42,7 @@ def send_message_notification_email(sender, instance, created, **kwargs):
     text_content = f"""
 New Message from {context['sender_name']}
 
-You have received a new message on Kasali Oloshe Inventory Management:
+You have received a new message on CrystalCrest Global Inventory Management System.:
 
 From: {context['sender_name']}
 Time: {context['timestamp']}
@@ -53,7 +53,7 @@ Message:
 View your messages: {context['chat_url']}
 
 ---
-Kasali Oloshe Inventory Management System
+CrystalCrest Global Inventory Management System
     """
     
     subject = f"New message from {context['sender_name']}"

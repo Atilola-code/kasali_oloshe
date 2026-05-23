@@ -11,8 +11,8 @@ from django.db import transaction
 from django.core.cache import cache
 from django.utils import timezone
 
-from .models import Sale, Deposit, StopSaleLog, Credit, CreditPayment
-from .serializers import SaleSerializer, DepositSerializer, StopSaleLogSerializer, StopSaleStatusSerializer, CreditSerializer, ClearCreditSerializer
+from .models import Sale, Deposit, StopSaleLog, Credit, CreditPayment, Unsupplied
+from .serializers import SaleSerializer, DepositSerializer, StopSaleLogSerializer, StopSaleStatusSerializer, CreditSerializer, ClearCreditSerializer, UnsuppliedSerializer
 from user.permissions import IsAdminOrManager, IsCashier
 
 logger = logging.getLogger(__name__)
@@ -653,3 +653,39 @@ class CreditViewSet(viewsets.ReadOnlyModelViewSet):
         credit.refresh_from_db()
         response_serializer = CreditSerializer(credit)
         return Response(response_serializer.data)
+    
+class UnsuppliedViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing unsupplied goods records.
+    """
+    queryset = Unsupplied.objects.all().order_by('-created_at')
+    serializer_class = UnsuppliedSerializer
+    permission_classes = [IsAuthenticated]
+ 
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        status = self.request.query_params.get('status')
+        if status:
+            queryset = queryset.filter(status=status)
+        return queryset
+ 
+    @extend_schema(
+        summary="Mark unsupplied as supplied",
+        description="Flag an unsupplied record as supplied",
+        responses={200: UnsuppliedSerializer},
+        tags=["Unsupplied"]
+    )
+    @action(detail=True, methods=['post'])
+    def mark_supplied(self, request, pk=None):
+        unsupplied = self.get_object()
+ 
+        if unsupplied.status == 'supplied':
+            return Response(
+                {'error': 'This record is already marked as supplied'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+ 
+        unsupplied.mark_as_supplied(request.user)
+        unsupplied.refresh_from_db()
+        serializer = UnsuppliedSerializer(unsupplied, context={'request': request})
+        return Response(serializer.data)

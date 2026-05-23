@@ -70,7 +70,7 @@ Items:
     for item in items:
         text_content += f"\n- {item['product_name']}: {item['quantity']} x ₦{item['unit_price']}"
     
-    text_content += "\n\nThis is an automated notification from Kasali Oloshe Inventory Management System."
+    text_content += "\n\nThis is an automated notification from CrystalCrest Global Inventory Management System."
     
     # Determine recipients
     recipients = [settings.EMAIL_HOST_USER]

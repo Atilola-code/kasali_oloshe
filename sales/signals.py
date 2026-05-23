@@ -103,7 +103,7 @@ Change: ₦{instance.change_due:,.2f}
 
 Thank you for your purchase!
 
-Kasali Oloshe Inventory Management
+CrystalCrest Global Inventory Management System
 Contact: {settings.EMAIL_HOST_USER}
     """
     

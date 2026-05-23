@@ -140,3 +140,50 @@ class CreditPayment(models.Model):
             self.credit.save(update_fields=['amount_paid', 'outstanding_amount'])
             self.credit.update_status()
         super().save(*args, **kwargs)
+
+class Unsupplied(models.Model):
+    STATUS_CHOICES = [
+        ('unsupplied', 'Unsupplied'),
+        ('supplied', 'Supplied'),
+    ]
+ 
+    customer_name = models.CharField(max_length=100)
+    date = models.DateTimeField(default=timezone.now)
+    notes = models.TextField(blank=True, null=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='unsupplied')
+    supplied_at = models.DateTimeField(null=True, blank=True)
+    supplied_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='supplied_records'
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='created_unsupplied'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+ 
+    class Meta:
+        ordering = ['-created_at']
+ 
+    def __str__(self):
+        return f"Unsupplied #{self.id} - {self.customer_name} ({self.status})"
+ 
+    def mark_as_supplied(self, user):
+        self.status = 'supplied'
+        self.supplied_at = timezone.now()
+        self.supplied_by = user
+        self.save(update_fields=['status', 'supplied_at', 'supplied_by'])
+ 
+ 
+class UnsuppliedItem(models.Model):
+    unsupplied = models.ForeignKey(Unsupplied, on_delete=models.CASCADE, related_name='items')
+    product = models.ForeignKey(Product, on_delete=models.PROTECT)
+    quantity = models.PositiveIntegerField()
+    notes = models.TextField(blank=True, null=True)
+ 
+    def __str__(self):
+        return f"{self.product.name} x {self.quantity}"

@@ -48,7 +48,7 @@ if 'SUPABASE_DB_HOST' in os.environ:
             'USER': os.getenv('SUPABASE_DB_USER'),
             'PASSWORD': os.getenv('SUPABASE_DB_PASSWORD'),
             'HOST': os.getenv('SUPABASE_DB_HOST'),
-            'PORT': os.getenv('SUPABASE_DB_PORT', '6543'),  # Changed default to 6543
+            'PORT': os.getenv('SUPABASE_DB_PORT', '6543'), 
             'CONN_MAX_AGE': 600,
             'OPTIONS': {
                 'sslmode': 'require'
@@ -81,7 +81,6 @@ else:
         }
     }
 
-# ✅ CACHING - MOVED OUTSIDE THE DATABASE CONDITIONAL
 # Database query optimization
 DATABASE_OPTIONS = {
     'connect_timeout': 10,
@@ -105,7 +104,7 @@ if django_redis_installed and redis_url:
             "TIMEOUT": 300,
         }
     }
-    print("✅ Using Upstash Redis for caching")
+    print("Using Upstash Redis for caching")
 else:
     CACHES = {
         'default': {
@@ -251,8 +250,8 @@ TEMPLATES = [
 WSGI_APPLICATION = 'my_project.wsgi.application'
 
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(days=1), # Set expiration for access token
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=7), # Set expiration for refresh token
+    'ACCESS_TOKEN_LIFETIME': timedelta(days=7), # Set expiration for access token
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=14), # Set expiration for refresh token
     'ROTATE_REFRESH_TOKENS': False,
     'BLACKLIST_AFTER_ROTATION': True,
 
