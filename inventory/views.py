@@ -6,6 +6,12 @@ from .models import Product
 from .serializers import ProductSerializer, ProductReadOnlySerializer
 from user.permissions import IsAdminOrManager 
 from rest_framework.permissions import SAFE_METHODS
+from django.db.models import ProtectedError
+from rest_framework.response import Response
+from rest_framework import status
+import logging
+
+logger = logging.getLogger(__name__)
 
 class ProductListCreateView(generics.ListCreateAPIView):
     queryset = Product.objects.all().order_by('-date_added')
@@ -39,14 +45,41 @@ class ProductRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
     permission_classes = [IsAuthenticated]
 
     def get_permissions(self):
-        """Override to allow cashiers to view but not modify"""
         if self.request.method in SAFE_METHODS:
-            return [IsAuthenticated()]  # Anyone authenticated can view
+            return [IsAuthenticated()]
         return [IsAuthenticated(), IsAdminOrManager()]
-    
+
     @extend_schema(summary="Retrieve, update or delete a product", tags=["Inventory"])
     def get(self, request, *args, **kwargs):
-        return super().get(request,*args,**kwargs)
+        return super().get(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        try:
+            instance = self.get_object()
+            product_name = instance.name
+            instance.delete()
+            return Response(
+                {"message": f"Product '{product_name}' deleted successfully"},
+                status=status.HTTP_200_OK
+            )
+        except ProtectedError as e:
+            logger.error(f"ProtectedError deleting product: {e}")
+            return Response(
+                {"error": "Cannot delete this product because it is referenced by existing sales or records. "
+                          "Consider archiving instead."},
+                status=status.HTTP_409_CONFLICT
+            )
+        except Product.DoesNotExist:
+            return Response(
+                {"error": "Product not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            logger.error(f"Error deleting product: {e}", exc_info=True)
+            return Response(
+                {"error": f"Failed to delete product: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 class ProductSearchView(generics.ListAPIView):

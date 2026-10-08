@@ -8,7 +8,7 @@ from .models import User
 from .serializers import UserSerializer, LoginSerializer, CustomTokenObtainPairSerializer
 from .permissions import IsAdminOrManager
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 
 
@@ -21,16 +21,7 @@ class RegisterUserView(generics.CreateAPIView):
     """
     queryset = User.objects.all()
     serializer_class = UserSerializer
-    permission_classes = [IsAdminOrManager]
-
-    # def perform_create(self, serializer):
-    #     # Make first user ADMIN automatically
-    #     user = serializer.save()
-    #     if User.objects.count() == 1:  # First user ever
-    #         user.role = 'ADMIN'
-    #         user.is_staff = True
-    #         user.is_superuser = True
-    #         user.save()
+    permission_classes = [IsAuthenticated, IsAdminOrManager]  # Allow any user to access this endpoint for registration
             
     @extend_schema(
         summary="Register a new user (Admin or Manager)",
@@ -57,6 +48,52 @@ class RegisterUserView(generics.CreateAPIView):
     def post(self, request, *args, **kwargs):
         return super().post(request, *args, **kwargs)
 
+class SignupView(generics.CreateAPIView):
+    """
+    Public signup endpoint. Creates a new ADMIN account (account owner).
+    Rejects if the email already exists.
+    """
+    queryset = User.objects.all()
+    serializer_class = UserSerializer
+    permission_classes = [AllowAny]
+
+    @extend_schema(
+        summary="Sign up a new account owner (public)",
+        description="Creates a new ADMIN account. Publicly accessible.",
+        tags=["User Management"],
+        responses={
+            201: UserSerializer,
+            400: OpenApiResponse(description="Validation error (e.g. email already exists)"),
+        }
+    )
+    def post(self, request, *args, **kwargs):
+        email = request.data.get("email", "").strip().lower()
+
+        #  Explicit email-exists check
+        if User.objects.filter(email__iexact=email).exists():
+            return Response(
+                {"email": ["A user with this email already exists."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Force public signup to create an ADMIN
+        data = request.data.copy()
+        data["role"] = "ADMIN"
+
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.save()
+
+        return Response(
+            {
+                "id": user.id,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "email": user.email,
+                "role": user.role,
+            },
+            status=status.HTTP_201_CREATED,
+        )
 
 class LoginView(generics.CreateAPIView):
     """
@@ -180,36 +217,8 @@ class UserDetailView(generics.RetrieveUpdateDestroyAPIView):
         
         return super().delete(request, *args, **kwargs)
 
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def health_check(request):
+    return Response({"status": "ok"})
 
-
-    # @api_view(['POST'])
-    # def refresh_token_view(request):
-    #     """
-    #     Custom token refresh endpoint
-    #     """
-    #     refresh_token = request.data.get('refresh')
-        
-    #     if not refresh_token:
-    #         return Response(
-    #             {'error': 'Refresh token is required'}, 
-    #             status=status.HTTP_400_BAD_REQUEST
-    #         )
-        
-    #     try:
-    #         refresh = RefreshToken(refresh_token)
-    #         data = {
-    #             'access': str(refresh.access_token),
-    #         }
-            
-    #         # Optionally rotate refresh token
-    #         # refresh.set_jti()
-    #         # refresh.set_exp()
-    #         # data['refresh'] = str(refresh)
-            
-    #         return Response(data, status=status.HTTP_200_OK)
-        
-    #     except Exception as e:
-    #         return Response(
-    #             {'error': 'Invalid or expired refresh token'}, 
-    #             status=status.HTTP_401_UNAUTHORIZED
-    #         )

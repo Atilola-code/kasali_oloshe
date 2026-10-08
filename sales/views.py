@@ -21,6 +21,7 @@ class SaleViewSet(mixins.ListModelMixin,
                   mixins.RetrieveModelMixin,
                   mixins.CreateModelMixin,
                   mixins.UpdateModelMixin,
+                  mixins.DestroyModelMixin,
                   viewsets.GenericViewSet):
     """
     Sale ViewSet that provides list, retrieve, create, update operations
@@ -157,6 +158,28 @@ class SaleViewSet(mixins.ListModelMixin,
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
+    def get_permissions(self):
+        if self.action == 'destroy':
+            return [IsAuthenticated(), IsAdminOrManager()]
+        return [IsAuthenticated()]
+
+    def destroy(self, request, *args, **kwargs):
+        try:
+            sale = self.get_object()
+            # Restore stock before deleting
+            for item in sale.items.all():
+                product = item.product
+                product.quantity += item.quantity
+                product.save(update_fields=['quantity'])
+            invoice = sale.invoice_id
+            sale.delete()
+            return Response(
+                {"message": f"Sale {invoice} deleted and stock restored"},
+                status=status.HTTP_200_OK
+            )
+        except Exception as e:
+            logger.error(f"Error deleting sale: {e}", exc_info=True)
+            return Response({"error": str(e)}, status=500)
 
 class BulkSalesSyncView(generics.CreateAPIView):
     """
@@ -203,7 +226,7 @@ class BulkSalesSyncView(generics.CreateAPIView):
                 status=status.HTTP_207_MULTI_STATUS if errors else status.HTTP_201_CREATED
             )
         except Exception as e:
-            logger.error(f"❌ Error in bulk sales sync: {str(e)}")
+            logger.error(f" Error in bulk sales sync: {str(e)}")
             logger.error(traceback.format_exc())
             return Response(
                 {'error': str(e)},
@@ -211,7 +234,8 @@ class BulkSalesSyncView(generics.CreateAPIView):
             )
 
     
-class DepositAPIView(generics.ListCreateAPIView):  # Changed from APIView
+
+class DepositAPIView(generics.ListCreateAPIView): 
     """
     Handle deposits with GET and POST methods
     """
@@ -240,6 +264,11 @@ class DepositAPIView(generics.ListCreateAPIView):  # Changed from APIView
     def post(self, request, *args, **kwargs):
         return self.create(request, *args, **kwargs)
 
+    def get_permissions(self):
+        if self.request.method == 'DELETE':
+            return [IsAuthenticated(), IsAdminOrManager()]
+        return [IsAuthenticated()]
+    
 @extend_schema(
     tags=["Stop Sale"],
     summary="Get stop sale status",
@@ -423,6 +452,19 @@ def get_stop_sale_history(request):
     serializer = StopSaleLogSerializer(logs, many=True)
     return Response(serializer.data)
 
+class DepositDetailView(generics.RetrieveDestroyAPIView):
+    queryset = Deposit.objects.all()
+    serializer_class = DepositSerializer
+    permission_classes = [IsAuthenticated, IsAdminOrManager]
+
+    def destroy(self, request, *args, **kwargs):
+        try:
+            deposit = self.get_object()
+            deposit.delete()
+            return Response({"message": "Deposit deleted"}, status=200)
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
+        
 
 class DailySalesReportView(generics.GenericAPIView):  # Changed from APIView
     """
@@ -632,6 +674,12 @@ class CreditViewSet(viewsets.ReadOnlyModelViewSet):
         description="Mark a credit as partially paid without recording payment",
         responses={200: CreditSerializer}
     )
+
+    @action(detail=True, methods=['delete'], permission_classes=[IsAuthenticated, IsAdminOrManager])
+    def destroy_credit(self, request, pk=None):
+        credit = self.get_object()
+        credit.delete()
+        return Response({"message": "Credit deleted"}, status=200)
     
     @action(detail=True, methods=['post'])
     def mark_partial(self, request, pk=None):

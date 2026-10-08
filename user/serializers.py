@@ -8,7 +8,7 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     def get_token(cls, user):
         token = super().get_token(user)
         
-        # Add custom claims
+     
         token['email'] = user.email
         token['first_name'] = user.first_name
         token['last_name'] = user.last_name
@@ -20,7 +20,7 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     def validate(self, attrs):
         data = super().validate(attrs)
         
-        # Add user info to response
+        
         data['user'] = {
             'id': self.user.id,
             'first_name': self.user.first_name,
@@ -38,7 +38,7 @@ class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = ['id','first_name','last_name','email','role','phone','password','confirm_password',]
-        read_only_fields = ['id',]  # Prevent users from setting these manually during signup
+        read_only_fields = ['id',]  
 
     def validate(self, attrs):
         # Validate password match and strength
@@ -49,8 +49,17 @@ class UserSerializer(serializers.ModelSerializer):
         validate_password(attrs.get("password"))
         return attrs
 
+    def validate_email(self, value):
+        value = value.strip().lower()
+        qs = User.objects.filter(email__iexact=value)
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError("A user with this email already exists.")
+        return value
+
     def create(self, validated_data):
-        #  Remove confirm_password since it's not in the model
+       
         validated_data.pop("confirm_password", None)
         password = validated_data.pop('password')
         user = User(**validated_data)
@@ -59,7 +68,7 @@ class UserSerializer(serializers.ModelSerializer):
         return user
 
     def to_representation(self, instance):
-        # Exclude password fields from the serialized output
+       
         rep = super().to_representation(instance)
         rep.pop('password', None)
         rep.pop('confirm_password', None)

@@ -170,7 +170,7 @@ class SaleSerializer(serializers.ModelSerializer):
             cashier=user,
             customer_name=validated_data.get('customer_name', ''),
             subtotal=subtotal_decimal,
-            discount_amount=discount_amount_decimal,  # ✅ Store discount amount
+            discount_amount=discount_amount_decimal,  
             vat_amount=vat_amount,
             total_amount=total,
             payment_method=validated_data.get('payment_method', 'cash'),

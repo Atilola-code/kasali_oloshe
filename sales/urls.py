@@ -22,6 +22,7 @@ urlpatterns = [
 
     # Deposit endpoints
     path('deposits/', views.DepositAPIView.as_view(), name='deposit-list-create'),
+    path('deposits/<int:pk>/', views.DepositDetailView.as_view(), name='deposit-detail'),
 
     # Sales endpoints
     path('bulk-sync/', views.BulkSalesSyncView.as_view(), name='bulk-sync'),
