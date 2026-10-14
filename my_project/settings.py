@@ -48,11 +48,10 @@ if 'SUPABASE_DB_HOST' in os.environ:
             'USER': os.getenv('SUPABASE_DB_USER'),
             'PASSWORD': os.getenv('SUPABASE_DB_PASSWORD'),
             'HOST': os.getenv('SUPABASE_DB_HOST'),
-            'PORT': os.getenv('SUPABASE_DB_PORT', '6543'), 
-            'CONN_MAX_AGE': 600,
-            'OPTIONS': {
-                'sslmode': 'require'
-            }
+            'PORT': os.getenv('SUPABASE_DB_PORT', '5432'), 
+            'CONN_MAX_AGE': 0,
+            'DISABLE_SERVER_SIDE_CURSORS': True,
+            'OPTIONS': {'sslmode': 'require', 'connect_timeout': 10},
         }
     }
 elif 'DATABASE_URL' in os.environ:
@@ -107,10 +106,10 @@ if django_redis_installed and redis_url:
     print("Using Upstash Redis for caching")
 else:
     CACHES = {
-        'default': {
-            'BACKEND': 'django.core.cache.backends.dummy.DummyCache',
-        }
+    'default': {
+        'BACKEND': 'django.core.cache.backends.dummy.DummyCache',
     }
+}
     if not django_redis_installed:
         print(" django-redis not installed. Cache disabled.")
     elif not redis_url:
@@ -131,8 +130,8 @@ INSTALLED_APPS = [
     'sales.apps.SalesConfig',
     'purchase_orders.apps.PurchaseOrdersConfig',
     'corsheaders',
-    'chat',
-    'channels',
+    # 'chat',
+    # 'channels',
     'drf_spectacular',
     'user',
     'expenses',
@@ -180,25 +179,26 @@ SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 AUTH_USER_MODEL = 'user.User'
 
 # Channels Configuration
-import ssl
+# import ssl
 
-redis_url = os.getenv('REDIS_URL')
-if redis_url:
-    CHANNEL_LAYERS = {
-        'default': {
-            'BACKEND': 'channels_redis.core.RedisChannelLayer',
-            'CONFIG': {
-                "hosts": [redis_url],
-                "prefix": "kasali_chat",
-            },
-        }
+# redis_url = os.getenv('REDIS_URL')
+# if redis_url:
+#     CHANNEL_LAYERS = {
+#         'default': {'BACKEND': 'channels.layers.InMemoryChannelLayer'},
+#         # 'default': {
+#         #     'BACKEND': 'channels_redis.core.RedisChannelLayer',
+#         #     'CONFIG': {
+#         #         "hosts": [redis_url],
+#         #         "prefix": "kasali_chat",
+#         #     },
+#         }
+    
+# else:
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels.layers.InMemoryChannelLayer',
     }
-else:
-    CHANNEL_LAYERS = {
-        'default': {
-            'BACKEND': 'channels.layers.InMemoryChannelLayer',
-        }
-    }
+}
 
 ASGI_APPLICATION = 'my_project.asgi.application'
 
