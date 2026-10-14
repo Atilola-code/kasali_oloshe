@@ -205,7 +205,7 @@ ASGI_APPLICATION = 'my_project.asgi.application'
 
 CORS_ALLOWED_ORIGINS = [
     "https://kasali-oloshe-inventory-management.vercel.app",
-    "https://crystalcrest-global-inventory-manag.vercel.app"
+    "https://crystalcrest-global-inventory-manag.vercel.app",
     "https://kasali-oloshe.onrender.com",
     "http://localhost:3000"
 ]
