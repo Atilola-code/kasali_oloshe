@@ -32,7 +32,7 @@ SECRET_KEY = os.getenv('SECRET_KEY')
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DEBUG', 'False') == 'True'
 
-ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1,kasali-oloshe.onrender.com,kasali-oloshe-inventory-management.vercel.app').split(',')
+ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1,kasali-oloshe.onrender.com,kasali-oloshe-inventory-management.vercel.app,https://crystalcrest-global-inventory-manag.vercel.app').split(',')
 
 RENDER_EXTERNAL_HOSTNAME = os.getenv('RENDER_EXTERNAL_HOSTNAME')
 if RENDER_EXTERNAL_HOSTNAME:
@@ -205,6 +205,7 @@ ASGI_APPLICATION = 'my_project.asgi.application'
 
 CORS_ALLOWED_ORIGINS = [
     "https://kasali-oloshe-inventory-management.vercel.app",
+    "https://crystalcrest-global-inventory-manag.vercel.app"
     "https://kasali-oloshe.onrender.com",
     "http://localhost:3000"
 ]
@@ -347,7 +348,7 @@ FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000')
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [BASE_DIR / 'templates'],  # ✅ This allows email templates
+        'DIRS': [BASE_DIR / 'templates'],  #  This allows email templates
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -360,7 +361,7 @@ TEMPLATES = [
     },
 ]
 
-# ✅ Logging configuration for debugging
+#  Logging configuration for debugging
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
