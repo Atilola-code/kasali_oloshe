@@ -107,7 +107,8 @@ if django_redis_installed and redis_url:
 else:
     CACHES = {
     'default': {
-        'BACKEND': 'django.core.cache.backends.dummy.DummyCache',
+        'BACKEND': 'django.core.cache.backends.db.DatabaseCache',
+        'LOCATION': 'django_cache',
     }
 }
     if not django_redis_installed:
