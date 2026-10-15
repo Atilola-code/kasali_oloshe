@@ -13,7 +13,8 @@ from django.utils import timezone
 
 from .models import Sale, Deposit, StopSaleLog, Credit, CreditPayment, Unsupplied
 from .serializers import SaleSerializer, DepositSerializer, StopSaleLogSerializer, StopSaleStatusSerializer, CreditSerializer, ClearCreditSerializer, UnsuppliedSerializer
-from user.permissions import IsAdminOrManager, IsCashier
+from user.permissions import IsAdminOrManager
+from purchase_orders.models import CashAtBank
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +123,7 @@ class SaleViewSet(mixins.ListModelMixin,
         try:
             return super().update(request, *args, **kwargs)
         except Exception as e:
-            logger.error(f"❌ Error updating sale: {str(e)}")
+            logger.error(f" Error updating sale: {str(e)}")
             logger.error(traceback.format_exc())
             return Response(
                 {
@@ -149,7 +150,7 @@ class SaleViewSet(mixins.ListModelMixin,
                 'message': 'Print count updated successfully'
             })
         except Exception as e:
-            logger.error(f"❌ Error incrementing print count: {str(e)}")
+            logger.error(f" Error incrementing print count: {str(e)}")
             logger.error(traceback.format_exc())
             return Response(
                 {
@@ -466,7 +467,7 @@ class DepositDetailView(generics.RetrieveDestroyAPIView):
             return Response({"error": str(e)}, status=500)
         
 
-class DailySalesReportView(generics.GenericAPIView):  # Changed from APIView
+class DailySalesReportView(generics.GenericAPIView):  
     """
     Get daily sales report including deposits
     """
@@ -619,9 +620,7 @@ class CreditViewSet(viewsets.ReadOnlyModelViewSet):
     )
     @action(detail=True, methods=['post'])
     def clear(self, request, pk=None):
-        """
-        Clear or partially clear a credit
-        """
+        """Clear or partially clear a credit."""
         credit = self.get_object()
 
         if credit.status == 'cleared':
@@ -631,40 +630,40 @@ class CreditViewSet(viewsets.ReadOnlyModelViewSet):
             )
         
         serializer = ClearCreditSerializer(data=request.data)
-        
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         
         amount_paid = serializer.validated_data['amount_paid']
         
-        # Validate amount
         if amount_paid > credit.outstanding_amount:
             return Response(
                 {'error': f'Payment amount cannot exceed outstanding amount ({credit.outstanding_amount})'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        # Create payment record
         with transaction.atomic():
+            # Create payment record (signal on CreditPayment.save updates the credit)
             payment = CreditPayment.objects.create(
-            credit=credit,
-            amount=amount_paid,
-            customer_name=serializer.validated_data['customer_name'],
-            payment_method=serializer.validated_data['payment_method'],
-            remarks=serializer.validated_data.get('remarks', ''),
-            recorded_by=request.user
-        )
-            
-        # If digital payment, create deposit automatically
-        if payment.payment_method in ['transfer', 'pos', 'bank']:
-            Deposit.objects.create(
+                credit=credit,
                 amount=amount_paid,
-                depositor_name=payment.customer_name,
-                bank_name=f"Credit Payment - {credit.invoice_id}",
-                created_by=request.user
+                customer_name=serializer.validated_data['customer_name'],
+                payment_method=serializer.validated_data['payment_method'],
+                remarks=serializer.validated_data.get('remarks', ''),
+                recorded_by=request.user
             )
-
-        # Return updated credit
+            
+            # Record cash inflow if payment is digital/bank
+            if payment.payment_method in ['transfer', 'pos', 'bank']:
+                CashAtBank.record_credit_payment(payment, request.user)
+                
+                # Also create a Deposit record for the deposits page
+                Deposit.objects.create(
+                    amount=amount_paid,
+                    depositor_name=payment.customer_name,
+                    bank_name=f"Credit Payment - {credit.invoice_id}",
+                    created_by=request.user
+                )
+        
         credit.refresh_from_db()
         response_serializer = CreditSerializer(credit)
         return Response(response_serializer.data)

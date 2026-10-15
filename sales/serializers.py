@@ -44,7 +44,6 @@ class SaleSerializer(serializers.ModelSerializer):
     cashier_name = serializers.CharField(source='cashier.get_full_name', read_only=True)
     invoice_id = serializers.CharField(read_only=True)
     date = serializers.DateTimeField(read_only=True)
-    # Change from discount_percent to discount_amount
     discount_amount = serializers.DecimalField(
         max_digits=10, 
         decimal_places=2, 
@@ -220,14 +219,14 @@ class SaleSerializer(serializers.ModelSerializer):
         
         # If items are provided, update them
         if items_data is not None:
-            # First, restore stock from old items
+            # Restore stock from old items
             old_items = SaleItem.objects.filter(sale=instance)
             for old_item in old_items:
                 product = old_item.product
-                product.quantity += old_item.quantity
-                product.save(update_fields=['quantity'])
+                if product:
+                    product.quantity += old_item.quantity
+                    product.save(update_fields=['quantity'])
             
-            # Delete old items
             old_items.delete()
             
             subtotal = sum(
@@ -235,37 +234,36 @@ class SaleSerializer(serializers.ModelSerializer):
                 for item_data in items_data
             )
             
-            #  Discount is now an amount
             discount_amount = min(Decimal(str(discount_amount)), subtotal)
             vat_base = subtotal - discount_amount
-            vat_amount = round((vat_base * (Decimal(str(vat_percent)) / Decimal('100'))), 2) if vat_percent else Decimal('0')
+            vat_amount = round(
+                (vat_base * (Decimal(str(vat_percent)) / Decimal('100'))), 2
+            ) if vat_percent else Decimal('0')
             total = round(vat_base + vat_amount, 2)
             
-            # Update sale instance with new totals
             instance.subtotal = subtotal
             instance.discount_amount = discount_amount
             instance.vat_amount = vat_amount
             instance.total_amount = total
             
             # Recalculate change if amount_paid is provided
-            if 'amount_paid' in validated_data:
-                amount_paid = validated_data.get('amount_paid', 0)
-                instance.change_due = round(amount_paid - total, 2) if amount_paid >= total else 0
+            amount_paid = validated_data.get('amount_paid', instance.amount_paid)
+            if amount_paid:
+                instance.amount_paid = amount_paid
+                instance.change_due = (
+                    round(amount_paid - total, 2) if amount_paid >= total else Decimal('0')
+                )
             
             # Create new sale items
             for item_data in items_data:
                 product = item_data['product']
-                
-                # Lock the product row for update
                 product = Product.objects.select_for_update().get(pk=product.id)
                 
-                # Check stock availability
                 if product.quantity < item_data['quantity']:
                     raise serializers.ValidationError(
-                        f"Insufficient stock for {product.name}. Available quantity: {product.quantity}"
+                        f"Insufficient stock for {product.name}. Available: {product.quantity}"
                     )
                 
-                # Create sale item
                 SaleItem.objects.create(
                     sale=instance,
                     product=product,
@@ -274,12 +272,49 @@ class SaleSerializer(serializers.ModelSerializer):
                     subtotal=item_data['quantity'] * item_data['unit_price']
                 )
                 
-                # Update product stock
                 product.quantity -= item_data['quantity']
                 product.save(update_fields=['quantity'])
         
+        # Save instance - this triggers the post_save signal that syncs Credit
         instance.save()
+        
+        # Explicitly ensure credit is synced (belt and suspenders)
+        self._sync_credit_record(instance)
+        
         return instance
+
+    def _sync_credit_record(self, sale):
+        """
+        Explicitly sync the Credit record after a sale update.
+        This handles the case where payment_method was changed to 'credit'.
+        """
+        from .models import Credit
+        
+        if sale.payment_method == 'credit':
+            credit, created = Credit.objects.get_or_create(
+                sale=sale,
+                defaults={
+                    'invoice_id': sale.invoice_id,
+                    'customer_name': sale.customer_name or 'Walk-in Customer',
+                    'total_amount': sale.total_amount,
+                    'amount_paid': sale.amount_paid,
+                    'outstanding_amount': sale.total_amount - sale.amount_paid,
+                    'date': sale.date,
+                    'created_by': sale.cashier,
+                }
+            )
+            if not created:
+                credit.invoice_id = sale.invoice_id
+                credit.customer_name = sale.customer_name or 'Walk-in Customer'
+                credit.total_amount = sale.total_amount
+                credit.amount_paid = sale.amount_paid
+                credit.outstanding_amount = sale.total_amount - sale.amount_paid
+                credit.date = sale.date
+                credit.save()
+                credit.update_status()
+        else:
+            # Remove credit if payment method is no longer 'credit'
+            Credit.objects.filter(sale=sale).delete()
     
 class DepositSerializer(serializers.ModelSerializer):
     class Meta:

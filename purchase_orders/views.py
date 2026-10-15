@@ -10,7 +10,7 @@ from django.utils import timezone
 import traceback
 import logging
 
-from .models import PurchaseOrder, PurchaseOrderHistory
+from .models import PurchaseOrder, PurchaseOrderHistory, CashAtBank
 from .serializers import PurchaseOrderSerializer, ChangeStatusSerializer
 from user.permissions import IsAdminOrManager
 
@@ -54,7 +54,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
             queryset = self.filter_queryset(self.get_queryset())
             serializer = self.get_serializer(queryset, many=True)
             
-            logger.info(f"📦 Returning {len(serializer.data)} purchase orders")
+            logger.info(f" Returning {len(serializer.data)} purchase orders")
             
             # Return data in expected format
             return Response({
@@ -62,7 +62,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 'result': serializer.data  # Changed from 'results' to 'result'
             })
         except Exception as e:
-            logger.error(f"❌ Error listing POs: {str(e)}")
+            logger.error(f" Error listing POs: {str(e)}")
             logger.error(traceback.format_exc())
             return Response(
                 {'error': str(e), 'result': []},
@@ -81,14 +81,14 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         FIXED: Better error handling for PO creation
         """
         try:
-            logger.info(f"📝 Creating PO with data: {request.data}")
+            logger.info(f" Creating PO with data: {request.data}")
             
             serializer = self.get_serializer(data=request.data)
             serializer.is_valid(raise_exception=True)
             self.perform_create(serializer)
             headers = self.get_success_headers(serializer.data)
             
-            logger.info(f"✅ PO created: {serializer.data.get('po_number')}")
+            logger.info(f" PO created: {serializer.data.get('po_number')}")
             
             return Response(
                 serializer.data, 
@@ -96,7 +96,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 headers=headers
             )
         except Exception as e:
-            logger.error(f"❌ Error creating PO: {str(e)}")
+            logger.error(f" Error creating PO: {str(e)}")
             logger.error(traceback.format_exc())
             return Response(
                 {
@@ -116,7 +116,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         try:
             return super().retrieve(request, *args, **kwargs)
         except Exception as e:
-            logger.error(f"❌ Error retrieving PO: {str(e)}")
+            logger.error(f" Error retrieving PO: {str(e)}")
             return Response(
                 {'error': str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -133,7 +133,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         try:
             return super().update(request, *args, **kwargs)
         except Exception as e:
-            logger.error(f"❌ Error updating PO: {str(e)}")
+            logger.error(f" Error updating PO: {str(e)}")
             return Response(
                 {'error': str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -149,7 +149,10 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def change_status(self, request, pk=None):
         """
-        Change the status of a purchase order
+        Change the status of a purchase order.
+        When status becomes 'received':
+        - Inventory is updated (stock added)
+        - Cash at Bank is deducted (payment recorded)
         """
         try:
             po = self.get_object()
@@ -177,6 +180,9 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
+            cash_deducted = None
+            new_balance = None
+            
             with transaction.atomic():
                 # Update status
                 po.status = new_status
@@ -189,8 +195,18 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                     po.received_by = request.user
                     po.received_at = timezone.now()
                     
-                    # Update inventory when PO is received
+                    # 1. Update inventory (add stock)
                     self._update_inventory(po)
+                    
+                    # 2. Deduct from Cash at Bank
+                    cash_entry = CashAtBank.record_po_payment(po, request.user)
+                    cash_deducted = float(po.total_amount)
+                    new_balance = float(CashAtBank.get_balance())
+                    
+                    logger.info(
+                        f" Cash deducted for PO {po.po_number}: "
+                        f"-₦{po.total_amount:,.2f} | New balance: ₦{new_balance:,.2f}"
+                    )
                 
                 po.save()
                 
@@ -204,14 +220,26 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                     notes=notes or f'Status changed from {old_status} to {new_status}'
                 )
             
-            logger.info(f"✅ PO {po.po_number} status changed: {old_status} → {new_status}")
+            logger.info(f" PO {po.po_number} status changed: {old_status} → {new_status}")
             
-            # Return updated PO with all related data
-            serializer = self.get_serializer(po)
-            return Response(serializer.data)
+            # Return updated PO with cash info
+            response_serializer = self.get_serializer(po)
+            response_data = response_serializer.data
+            
+            # Add cash deduction info to response
+            if cash_deducted is not None:
+                response_data['cash_deducted'] = cash_deducted
+                response_data['cash_at_bank_balance'] = new_balance
+                response_data['message'] = (
+                    f"PO received successfully. "
+                    f"₦{cash_deducted:,.2f} deducted from Cash at Bank. "
+                    f"New balance: ₦{new_balance:,.2f}"
+                )
+            
+            return Response(response_data)
         
         except Exception as e:
-            logger.error(f"❌ Error changing PO status: {str(e)}")
+            logger.error(f" Error changing PO status: {str(e)}")
             logger.error(traceback.format_exc())
             return Response(
                 {'error': str(e)},
@@ -230,7 +258,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
             product._updated_by = po.received_by
             product._update_reason = f'Purchase Order {po.po_number} received'
             product.save()
-            logger.info(f"📦 Updated {product.name} quantity: +{item.quantity}")
+            logger.info(f" Updated {product.name} quantity: +{item.quantity}")
     
     @extend_schema(
         summary="Get purchase order statistics",
@@ -259,7 +287,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 status='pending'
             ).aggregate(total=Sum('total_amount'))['total'] or 0
             
-            logger.info(f"📊 Statistics: {total_pos} total POs")
+            logger.info(f"Statistics: {total_pos} total POs")
             
             return Response({
                 'total_purchase_orders': total_pos,
@@ -271,9 +299,80 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 'pending_value': float(pending_value)
             })
         except Exception as e:
-            logger.error(f"❌ Error fetching statistics: {str(e)}")
+            logger.error(f" Error fetching statistics: {str(e)}")
             logger.error(traceback.format_exc())
             return Response(
                 {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+    @extend_schema(
+    summary="Get Cash at Bank balance",
+    description="Get the current cash at bank balance and recent transactions",
+    tags=["Purchase Orders"]
+    )
+    @action(detail=False, methods=['get'])
+    def cash_at_bank(self, request):
+        """Get current cash at bank balance and recent transactions."""
+        try:
+            from django.db import connection
+            from django.core.exceptions import ImproperlyConfigured
+
+            # 1. Verify the table exists
+            table_name = CashAtBank._meta.db_table
+            with connection.cursor() as cursor:
+                cursor.execute("""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables 
+                        WHERE table_name = %s
+                    );
+                """, [table_name])
+                table_exists = cursor.fetchone()[0]
+
+            if not table_exists:
+                return Response(
+                    {
+                        'error': f'Table "{table_name}" does not exist. Run: python manage.py migrate',
+                        'hint': 'The CashAtBank model has no corresponding DB table.',
+                    },
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
+
+            # 2. Try the actual query
+            balance = CashAtBank.get_balance()
+
+            recent = CashAtBank.objects.select_related('created_by').all()[:20]
+
+            transactions = []
+            for t in recent:
+                transactions.append({
+                    'id': t.id,
+                    'amount': float(t.amount),
+                    'transaction_type': t.transaction_type,
+                    'transaction_type_display': t.get_transaction_type_display(),
+                    'reference': t.reference,
+                    'description': t.description,
+                    'created_at': t.created_at,
+                    'created_by': t.created_by.get_full_name() if t.created_by else None,
+                })
+
+            return Response({
+                'balance': float(balance),
+                'transactions': transactions,
+            })
+
+        except Exception as e:
+            # ✅ Proper diagnostics
+            import traceback
+            tb = traceback.format_exc()
+            logger.error(f"cash_at_bank failed: {type(e).__name__}: {e}")
+            logger.error(tb)
+
+            return Response(
+                {
+                    'error': f"{type(e).__name__}: {e}" or 'Unknown error',
+                    'traceback': tb,
+                },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )

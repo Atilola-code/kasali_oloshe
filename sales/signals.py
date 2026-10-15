@@ -1,5 +1,5 @@
 # sales/signals.py
-from django.db.models.signals import post_migrate, post_save
+from django.db.models.signals import post_migrate, post_save, post_delete
 from django.dispatch import receiver
 from django.core.cache import cache
 from django.core.mail import EmailMultiAlternatives
@@ -17,19 +17,55 @@ def initialize_stop_sale_cache(sender, **kwargs):
 
 
 @receiver(post_save, sender=Sale)
-def create_credit_for_credit_sale(sender, instance, created, **kwargs):
-    """Automatically create a Credit record for credit sales"""
-    if created and instance.payment_method == 'credit':
-        Credit.objects.create(
+def sync_credit_for_sale(sender, instance, created, **kwargs):
+    """
+    Sync Credit record for credit sales.
+    Handles both creation AND updates (e.g., payment method changed to credit).
+    """
+    if instance.payment_method == 'credit':
+        # Get or create the credit record
+        credit, credit_created = Credit.objects.get_or_create(
             sale=instance,
-            invoice_id=instance.invoice_id,
-            customer_name=instance.customer_name or 'Walk-in Customer',
-            total_amount=instance.total_amount,
-            amount_paid=instance.amount_paid,
-            outstanding_amount=instance.total_amount - instance.amount_paid,
-            date=instance.date,
-            created_by=instance.cashier
+            defaults={
+                'invoice_id': instance.invoice_id,
+                'customer_name': instance.customer_name or 'Walk-in Customer',
+                'total_amount': instance.total_amount,
+                'amount_paid': instance.amount_paid,
+                'outstanding_amount': instance.total_amount - instance.amount_paid,
+                'date': instance.date,
+                'created_by': instance.cashier,
+            }
         )
+        
+        if not credit_created:
+            # Update the existing credit record with new values
+            credit.invoice_id = instance.invoice_id
+            credit.customer_name = instance.customer_name or 'Walk-in Customer'
+            credit.total_amount = instance.total_amount
+            credit.amount_paid = instance.amount_paid
+            credit.outstanding_amount = instance.total_amount - instance.amount_paid
+            credit.date = instance.date
+            credit.save(update_fields=[
+                'invoice_id', 'customer_name', 'total_amount',
+                'amount_paid', 'outstanding_amount', 'date'
+            ])
+            credit.update_status()
+            print(f"✓ Credit updated for sale {instance.invoice_id}")
+        else:
+            print(f"✓ Credit created for sale {instance.invoice_id}")
+    
+    else:
+        # If payment method changed FROM credit to something else,
+        # delete the credit record 
+        deleted, _ = Credit.objects.filter(sale=instance).delete()
+        if deleted:
+            print(f"✓ Credit removed for sale {instance.invoice_id} (payment method: {instance.payment_method})")
+
+
+@receiver(post_delete, sender=Sale)
+def cleanup_credit_on_sale_delete(sender, instance, **kwargs):
+    """Delete associated credit when a sale is deleted."""
+    Credit.objects.filter(sale=instance).delete()
 
 
 @receiver(post_save, sender=Sale)

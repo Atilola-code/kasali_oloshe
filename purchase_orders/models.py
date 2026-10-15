@@ -1,12 +1,12 @@
 from django.db import models
 
-# Create your models here.
 # purchase_orders/models.py
 from django.db import models
 from django.utils import timezone
 from inventory.models import Product
 from user.models import User
 import uuid
+from decimal import Decimal
 
 class PurchaseOrder(models.Model):
     STATUS_CHOICES = [
@@ -90,3 +90,99 @@ class PurchaseOrderHistory(models.Model):
     
     def __str__(self):
         return f"{self.purchase_order.po_number} - {self.action} at {self.timestamp}"
+
+
+class CashAtBank(models.Model):
+    """
+    Ledger-style model to track all cash at bank transactions.
+    Positive amounts = money coming in (deposits, digital sales, credit payments)
+    Negative amounts = money going out (PO payments, expenses)
+    """
+    TRANSACTION_TYPES = [
+        ('deposit', 'Bank Deposit'),
+        ('sale_digital', 'Digital Sale (Transfer/POS)'),
+        ('credit_payment', 'Credit Payment'),
+        ('purchase_order', 'Purchase Order Payment'),
+        ('expense', 'Expense'),
+        ('adjustment', 'Manual Adjustment'),
+    ]
+    
+    amount = models.DecimalField(
+        max_digits=14, 
+        decimal_places=2,
+        help_text="Positive = inflow, Negative = outflow"
+    )
+    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
+    reference = models.CharField(max_length=100, blank=True, help_text="e.g., PO number, Invoice ID")
+    description = models.TextField(blank=True)
+    created_by = models.ForeignKey(
+        User, 
+        on_delete=models.SET_NULL, 
+        null=True,
+        related_name='cash_transactions'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Cash at Bank Entry'
+        verbose_name_plural = 'Cash at Bank Entries'
+    
+    def __str__(self):
+        direction = '+' if self.amount >= 0 else ''
+        return f"{self.get_transaction_type_display()}: {direction}{self.amount} ({self.reference})"
+    
+    @classmethod
+    def get_balance(cls):
+        """Calculate current cash at bank balance."""
+        from django.db.models import Sum
+        result = cls.objects.aggregate(total=Sum('amount'))
+        return result['total'] or Decimal('0.00')
+    
+    @classmethod
+    def record_po_payment(cls, po, user):
+        """Record a PO payment (deduction) in the ledger."""
+        return cls.objects.create(
+            amount=-po.total_amount,  # Negative because it's an outflow
+            transaction_type='purchase_order',
+            reference=po.po_number,
+            description=f"Payment for PO {po.po_number} - {po.supplier_name}",
+            created_by=user
+        )
+    
+    @classmethod
+    def record_deposit(cls, deposit, user):
+        """Record a bank deposit (inflow)."""
+        return cls.objects.create(
+            amount=deposit.amount,
+            transaction_type='deposit',
+            reference=f"DEP-{deposit.id}",
+            description=f"Deposit by {deposit.depositor_name} - {deposit.bank_name}",
+            created_by=user
+        )
+    
+    @classmethod
+    def record_digital_sale(cls, sale, user):
+        """Record a digital sale (transfer/POS) as inflow."""
+        if sale.payment_method in ['transfer', 'pos']:
+            return cls.objects.create(
+                amount=sale.total_amount,
+                transaction_type='sale_digital',
+                reference=sale.invoice_id,
+                description=f"Digital sale ({sale.payment_method}) - {sale.customer_name or 'Walk-in'}",
+                created_by=user
+            )
+        return None
+    
+    @classmethod
+    def record_credit_payment(cls, payment, user):
+        """Record a credit payment via transfer/POS/bank as inflow."""
+        if payment.payment_method in ['transfer', 'pos', 'bank']:
+            return cls.objects.create(
+                amount=payment.amount,
+                transaction_type='credit_payment',
+                reference=payment.credit.invoice_id,
+                description=f"Credit payment for {payment.credit.invoice_id} - {payment.customer_name}",
+                created_by=user
+            )
+        return None
